@@ -1,4 +1,6 @@
 .git
+.codegraph
+.env
 **/node_modules
 web/.next
 web/out

@@ -1,0 +1,6 @@
+services:
+  artex:
+    image: artex:local
+    build:
+      context: .
+      dockerfile: Dockerfile
