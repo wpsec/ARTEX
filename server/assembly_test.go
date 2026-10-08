@@ -6,9 +6,9 @@ import (
 	"path/filepath"
 	"testing"
 
-	actool "github.com/Autumn-27/norma/tool"
 	"github.com/Autumn-27/artex/agent"
 	"github.com/Autumn-27/artex/db"
+	actool "github.com/Autumn-27/norma/tool"
 )
 
 // hasSkillTool reports whether the packed tool set contains the Skill meta-tool.
@@ -34,7 +34,11 @@ func TestAssembleVisibleSkill(t *testing.T) {
 	if err != nil {
 		t.Skipf("postgres unavailable (%v) — skipping", err)
 	}
-	defer pg.Close()
+	t.Cleanup(func() {
+		if err := pg.Close(); err != nil {
+			t.Errorf("close database: %v", err)
+		}
+	})
 
 	// Filesystem skill fixture: <skillDir>/t-assemble/SKILL.md. The directory name
 	// (t-assemble) is the visibility key matched against AgentSkillNames.
@@ -62,7 +66,11 @@ func TestAssembleVisibleSkill(t *testing.T) {
 	if err := pg.SetAgentSkillVisibility(ag.ID, nil); err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { _ = pg.SetAgentSkillVisibility(ag.ID, orig) })
+	t.Cleanup(func() {
+		if err := pg.SetAgentSkillVisibility(ag.ID, orig); err != nil {
+			t.Errorf("restore skill visibility: %v", err)
+		}
+	})
 
 	// before: skill not visible → no Skill meta-tool
 	extra, _, cleanup := agent.ToolAugment(context.Background(), "planner")
@@ -75,7 +83,11 @@ func TestAssembleVisibleSkill(t *testing.T) {
 	if err := pg.ToggleSkillVisibility(ag.ID, skillName, true); err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { _ = pg.ToggleSkillVisibility(ag.ID, skillName, false) })
+	t.Cleanup(func() {
+		if err := pg.DeleteSkillVisibility(skillName); err != nil {
+			t.Errorf("remove test skill visibility: %v", err)
+		}
+	})
 
 	// after: the Skill meta-tool is packed in
 	extra, _, cleanup = agent.ToolAugment(context.Background(), "planner")

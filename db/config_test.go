@@ -2,9 +2,14 @@ package db
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"errors"
+	"fmt"
+	"net/url"
+	"os"
 	"testing"
+	"time"
 )
 
 // TestPoolProfilesOrder pins the failover chain query: keyless profiles can't
@@ -62,6 +67,156 @@ func TestDeleteProfileContextHonorsCancellation(t *testing.T) {
 	if err := d.DeleteProfileContext(ctx, 1); !errors.Is(err, context.Canceled) {
 		t.Fatalf("DeleteProfileContext error=%v, want context cancellation", err)
 	}
+}
+
+func TestBuiltinSkillVisibilitySeedsAndPreservesOptOut(t *testing.T) {
+	dsn := isolatedTestDSN(t)
+	d, err := Open(dsn)
+	if err != nil {
+		t.Fatalf("open isolated PostgreSQL database: %v", err)
+	}
+	t.Cleanup(func() {
+		if err := d.Close(); err != nil {
+			t.Errorf("close database: %v", err)
+		}
+	})
+	reopen := func() {
+		next, err := Open(dsn)
+		if err != nil {
+			t.Fatalf("reopen database: %v", err)
+		}
+		if err := d.Close(); err != nil {
+			if closeErr := next.Close(); closeErr != nil {
+				t.Errorf("close replacement database after reopen failure: %v", closeErr)
+			}
+			t.Fatalf("close database before reopen: %v", err)
+		}
+		d = next
+	}
+
+	ag, err := d.GetAgentByKey("worker")
+	if err != nil || ag == nil {
+		t.Fatalf("worker agent: %v", err)
+	}
+
+	skillNames := []string{
+		"application-security-testing",
+		"web-app-penetration-testing",
+		"api-security-testing",
+		"owasp-top-10-testing",
+		"find-security-vulnerabilities-in-code",
+	}
+	for _, name := range skillNames {
+		if _, err := d.Exec(`DELETE FROM agent_skill_visibility WHERE agent_id=$1 AND skill_name=$2`, ag.ID, name); err != nil {
+			t.Fatal(err)
+		}
+	}
+	reopen()
+	visible, err := d.AgentSkillNames(ag.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range skillNames {
+		if !hasSkillName(visible, name) {
+			t.Errorf("default skill %s not visible to worker: %v", name, visible)
+		}
+	}
+
+	if err := d.SetAgentSkillVisibility(ag.ID, []string{"api-recon"}); err != nil {
+		t.Fatal(err)
+	}
+	reopen()
+	visible, err = d.AgentSkillNames(ag.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range skillNames {
+		if hasSkillName(visible, name) {
+			t.Errorf("builtin seed restored manually disabled skill %s: %v", name, visible)
+		}
+	}
+
+	if err := d.ToggleSkillVisibility(ag.ID, skillNames[0], true); err != nil {
+		t.Fatal(err)
+	}
+	reopen()
+	visible, err = d.AgentSkillNames(ag.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !hasSkillName(visible, skillNames[0]) {
+		t.Fatalf("explicitly enabled skill %s became hidden: %v", skillNames[0], visible)
+	}
+	if err := d.ToggleSkillVisibility(ag.ID, skillNames[0], false); err != nil {
+		t.Fatal(err)
+	}
+	reopen()
+	visible, err = d.AgentSkillNames(ag.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if hasSkillName(visible, skillNames[0]) {
+		t.Fatalf("builtin seed restored manually toggled-off skill %s: %v", skillNames[0], visible)
+	}
+}
+
+func isolatedTestDSN(t *testing.T) string {
+	t.Helper()
+	baseDSN := testDSN(t)
+	baseURL, err := url.Parse(baseDSN)
+	if err != nil || (baseURL.Scheme != "postgres" && baseURL.Scheme != "postgresql") {
+		t.Skipf("configured PostgreSQL DSN is not a URL")
+	}
+
+	databaseName := fmt.Sprintf("artex_test_%d_%d", os.Getpid(), time.Now().UnixNano())
+	testURL := *baseURL
+	testURL.Path = "/" + databaseName
+	testURL.RawPath = ""
+	adminURL := *baseURL
+	adminURL.Path = "/postgres"
+	adminURL.RawPath = ""
+	admin, err := sql.Open("pgx", adminURL.String())
+	if err != nil {
+		t.Skipf("connect to PostgreSQL for isolated test database: %v", err)
+	}
+	if err := admin.Ping(); err != nil {
+		if closeErr := admin.Close(); closeErr != nil {
+			t.Errorf("close PostgreSQL setup connection: %v", closeErr)
+		}
+		t.Skipf("PostgreSQL unavailable for isolated test database: %v", err)
+	}
+	if _, err := admin.Exec(`CREATE DATABASE "` + databaseName + `"`); err != nil {
+		if closeErr := admin.Close(); closeErr != nil {
+			t.Errorf("close PostgreSQL setup connection: %v", closeErr)
+		}
+		t.Skipf("cannot create isolated test database: %v", err)
+	}
+	t.Cleanup(func() {
+		admin, err := sql.Open("pgx", adminURL.String())
+		if err != nil {
+			t.Errorf("connect to PostgreSQL for test database cleanup: %v", err)
+			return
+		}
+		if _, err := admin.Exec(`DROP DATABASE IF EXISTS "` + databaseName + `"`); err != nil {
+			t.Errorf("drop isolated test database: %v", err)
+		}
+		if err := admin.Close(); err != nil {
+			t.Errorf("close PostgreSQL cleanup connection: %v", err)
+		}
+	})
+	if err := admin.Close(); err != nil {
+		t.Fatalf("close PostgreSQL setup connection: %v", err)
+	}
+	return testURL.String()
+}
+
+func hasSkillName(names []string, target string) bool {
+	for _, name := range names {
+		if name == target {
+			return true
+		}
+	}
+	return false
 }
 
 func TestConfigStores(t *testing.T) {

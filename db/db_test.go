@@ -51,6 +51,34 @@ func TestApplySchemaRetriesOnlyDeadlocks(t *testing.T) {
 	}
 }
 
+func TestBuiltinSkillVisibilityDefaults(t *testing.T) {
+	wantAgents := map[string]bool{"auto": true, "pentest": true, "worker": true}
+	wantSkills := []string{
+		"application-security-testing",
+		"web-app-penetration-testing",
+		"api-security-testing",
+		"owasp-top-10-testing",
+		"find-security-vulnerabilities-in-code",
+	}
+	for _, name := range wantSkills {
+		got := builtinSkillVisibility[name]
+		if len(got) != len(wantAgents) {
+			t.Errorf("%s visibility=%v, want agents %v", name, got, wantAgents)
+			continue
+		}
+		for _, agent := range got {
+			if !wantAgents[agent] {
+				t.Errorf("%s unexpectedly visible to %s", name, agent)
+			}
+			delete(wantAgents, agent)
+		}
+		if len(wantAgents) != 0 {
+			t.Errorf("%s missing default agents: %v", name, wantAgents)
+		}
+		wantAgents = map[string]bool{"auto": true, "pentest": true, "worker": true}
+	}
+}
+
 // testDSN returns the configured DSN, skipping the test when neither the env var
 // nor a config file supplies one (DSN no longer has a built-in default).
 func testDSN(t *testing.T) string {
