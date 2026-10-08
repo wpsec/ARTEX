@@ -5,7 +5,7 @@
 AI 自主渗透测试系统（Go 后端 + Next.js 前端）
 
 
-📦 **项目已停止维护；本仓库保存最后一版源码。Docker 镜像与预编译 Release 已不可用，请按下方说明从源码本地构建并运行。**
+📦 **作者已停止维护项目；本仓库保存最后一版源码。Docker 镜像与预编译 Release 已不可用，请按下方说明从源码本地构建容器并运行。**
 
 </div>
 
@@ -359,23 +359,6 @@ flowchart TB
 ```
 
 于是攻击链在“事件驱动 + 无状态会话”的环境下依然**稳定推进、不重复、不错序**——这是 ARTEX 能自主走完多步利用链的关键。
-
----
-
-## 交流群
-
-扫码关注微信公众号 **SecSentry**，在公众号后台私信即可入群交流。
-
-<div align="center">
-
-<img src="screenshots/wx.png" alt="微信公众号 SecSentry" width="480" />
-
-</div>
-
----
-## 参考
-
-https://github.com/oritera/Cairn
 
 
 ## 许可与免责声明
